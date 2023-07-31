@@ -1,0 +1,124 @@
+/**
+ *Submitted for verification at Etherscan.io on 2023-07-31
+*/
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract Lottery {
+    address public manager;
+    address[] public players;
+    uint256 public totalBalance;
+    uint256 public registrationStart;
+    uint256 public registrationEnd;
+
+    struct Winner {
+        address winnerAddress;
+        uint256 prizePercentage;
+        uint256 claimDeadline;
+        bool claimed;
+    }
+
+    Winner[10] public winners;
+
+    constructor() {
+        manager = msg.sender;
+    }
+
+    modifier onlyManager() {
+        require(msg.sender == manager, "Only the manager can perform this action");
+        _;
+    }
+
+    modifier duringRegistrationPeriod() {
+        require(block.timestamp >= registrationStart && block.timestamp <= registrationEnd, "Registration period has ended");
+        _;
+    }
+
+    function enter() public payable duringRegistrationPeriod {
+        require(msg.value >= 0.0001 ether, "Minimum ticket price is 0.0001 ether");
+        players.push(msg.sender);
+        totalBalance += msg.value;
+    }
+
+    function setRegistrationPeriod(uint256 start, uint256 durationHours) public onlyManager {
+        registrationStart = start;
+        registrationEnd = start + (durationHours * 1 hours);
+    }
+
+    function random() private view returns (uint256) {
+        return uint256(keccak256(abi.encodePacked(block.difficulty, block.timestamp, players)));
+    }
+
+    function pickWinners() public onlyManager {
+        require(players.length >= 10, "There must be at least 10 participants to pick winners");
+        require(block.timestamp > registrationEnd, "Registration period has not ended yet");
+
+        // Randomly select the winners
+        for (uint256 i = 0; i < 10; i++) {
+            uint256 index = random() % players.length;
+            winners[i].winnerAddress = players[index];
+            players[index] = players[players.length - 1];
+            players.pop();
+        }
+
+        // Calculate and assign the prize percentage for each winner
+        uint256 prizePool = totalBalance;
+        uint256 firstPrize = (prizePool * 30) / 100;
+        prizePool -= firstPrize;
+        winners[0].prizePercentage = 30;
+
+        uint256 secondPrize = (prizePool * 25) / 100;
+        prizePool -= secondPrize;
+        winners[1].prizePercentage = 25;
+
+        uint256 thirdPrize = (prizePool * 15) / 100;
+        prizePool -= thirdPrize;
+        winners[2].prizePercentage = 15;
+
+        uint256 fourthPrize = (prizePool * 10) / 100;
+        prizePool -= fourthPrize;
+        winners[3].prizePercentage = 10;
+
+        uint256 fifthPrize = (prizePool * 5) / 100;
+        prizePool -= fifthPrize;
+        winners[4].prizePercentage = 5;
+
+        uint256 remainingPrizePercentage = 12;
+        uint256 equalSharePrize = prizePool * remainingPrizePercentage / 100;
+
+        for (uint256 i = 5; i < 10; i++) {
+            winners[i].prizePercentage = remainingPrizePercentage / 6;
+            prizePool -= equalSharePrize;
+        }
+
+        // Set the claim deadline for each winner (72 hours from now)
+        uint256 claimDeadline = block.timestamp + 72 hours;
+        for (uint256 i = 0; i < 10; i++) {
+            winners[i].claimDeadline = claimDeadline;
+            winners[i].claimed = false;
+        }
+    }
+
+    function claimPrize() public {
+        for (uint256 i = 0; i < 10; i++) {
+            require(winners[i].winnerAddress == msg.sender, "You are not one of the winners");
+            require(!winners[i].claimed, "Prize has already been claimed");
+            require(winners[i].claimDeadline >= block.timestamp, "Prize claim deadline has passed");
+
+            uint256 prizeAmount = (totalBalance * winners[i].prizePercentage) / 100;
+            (bool success, ) = winners[i].winnerAddress.call{value: prizeAmount}("");
+            require(success, "Failed to send the prize to the winner");
+
+            winners[i].claimed = true;
+        }
+    }
+
+    function getPlayers() public view returns (address[] memory) {
+        return players;
+    }
+
+    function getTotalBalance() public view returns (uint256) {
+        return totalBalance;
+    }
+}
